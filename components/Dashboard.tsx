@@ -42,6 +42,9 @@ export default function Dashboard() {
   const [running, setRunning] =
     useState(false);
 
+  const [activeAgent, setActiveAgent] =
+    useState("Preparing agents...");
+
   const [approvalStatus, setApprovalStatus] =
     useState<ApprovalStatus>("PENDING");
 
@@ -52,8 +55,11 @@ export default function Dashboard() {
     useState("");
 
   /*
-   * Update selected scenario
+   * ============================================================
+   * SCENARIO CHANGE
+   * ============================================================
    */
+
   useEffect(() => {
     setScenario(
       scenarios.find(
@@ -66,11 +72,18 @@ export default function Dashboard() {
     setApprovalStatus("PENDING");
     setApprovalMessage("");
     setExecutionStatus("");
+
+    setActiveAgent(
+      "Preparing agents...",
+    );
   }, [scenarioId]);
 
   /*
+   * ============================================================
    * RUN AI INVESTIGATION
+   * ============================================================
    */
+
   async function run() {
     setRunning(true);
 
@@ -80,15 +93,46 @@ export default function Dashboard() {
     setApprovalMessage("");
     setExecutionStatus("");
 
+    const agentSteps = [
+      "Supplier Agent",
+      "Inventory Agent",
+      "Demand Agent",
+      "Logistics Agent",
+      "Risk Agent",
+      "Impact Agent",
+      "Alternative Supplier Agent",
+      "Decision Agent",
+    ];
+
+    let stepIndex = 0;
+
+    setActiveAgent(agentSteps[0]);
+
+    const agentTimer =
+      setInterval(() => {
+        stepIndex++;
+
+        if (
+          stepIndex <
+          agentSteps.length
+        ) {
+          setActiveAgent(
+            agentSteps[stepIndex],
+          );
+        }
+      }, 650);
+
     try {
       const response = await fetch(
         "/api/investigate",
         {
           method: "POST",
+
           headers: {
             "Content-Type":
               "application/json",
           },
+
           body: JSON.stringify({
             scenarioId,
           }),
@@ -106,11 +150,20 @@ export default function Dashboard() {
       }
 
       setScenario(data.scenario);
+
       setAnalysis(data.analysis);
+
+      setActiveAgent(
+        "Investigation Complete",
+      );
     } catch (error) {
       console.error(
         "Investigation error:",
         error,
+      );
+
+      setActiveAgent(
+        "Investigation Failed",
       );
 
       alert(
@@ -119,16 +172,18 @@ export default function Dashboard() {
           : "Unable to run AI investigation.",
       );
     } finally {
+      clearInterval(agentTimer);
+
       setRunning(false);
     }
   }
 
   /*
+   * ============================================================
    * HUMAN APPROVAL
-   *
-   * This calls the backend /api/approve
-   * instead of only changing local UI state.
+   * ============================================================
    */
+
   async function handleApproval(
     approved: boolean,
   ) {
@@ -137,7 +192,9 @@ export default function Dashboard() {
     }
 
     setApprovalStatus("APPROVING");
+
     setApprovalMessage("");
+
     setExecutionStatus("");
 
     try {
@@ -145,14 +202,18 @@ export default function Dashboard() {
         "/api/approve",
         {
           method: "POST",
+
           headers: {
             "Content-Type":
               "application/json",
           },
+
           body: JSON.stringify({
             scenarioId,
+
             action:
               analysis.recommendation,
+
             approved,
           }),
         },
@@ -169,7 +230,9 @@ export default function Dashboard() {
       }
 
       if (approved) {
-        setApprovalStatus("APPROVED");
+        setApprovalStatus(
+          "APPROVED",
+        );
 
         setApprovalMessage(
           data?.message ||
@@ -181,7 +244,9 @@ export default function Dashboard() {
             "READY_FOR_EXECUTION",
         );
       } else {
-        setApprovalStatus("REJECTED");
+        setApprovalStatus(
+          "REJECTED",
+        );
 
         setApprovalMessage(
           data?.message ||
@@ -207,8 +272,11 @@ export default function Dashboard() {
   }
 
   /*
+   * ============================================================
    * SIGNAL CARDS
+   * ============================================================
    */
+
   const cards = [
     [
       "Supplier",
@@ -216,18 +284,21 @@ export default function Dashboard() {
       `${scenario.supplier.name} • ${scenario.supplier.delayDays}d delay`,
       Factory,
     ],
+
     [
       "Inventory",
       `${scenario.inventory.daysRemaining} days`,
       `${scenario.inventory.units.toLocaleString()} units available`,
       PackageSearch,
     ],
+
     [
       "Demand",
       scenario.demand.level,
       `${scenario.demand.dailyUnits.toLocaleString()} units/day`,
       Gauge,
     ],
+
     [
       "Logistics",
       scenario.logistics.status,
@@ -238,6 +309,7 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen grid-bg">
+
       <div className="mx-auto max-w-[1500px] px-5 py-6 md:px-8">
 
         {/* =====================================================
@@ -253,6 +325,7 @@ export default function Dashboard() {
             </div>
 
             <div>
+
               <h1 className="text-xl font-bold">
                 Supply Chain AI Control Center
               </h1>
@@ -260,6 +333,7 @@ export default function Dashboard() {
               <p className="text-sm text-slate-400">
                 Agentic disruption detection & response
               </p>
+
             </div>
 
           </div>
@@ -279,37 +353,99 @@ export default function Dashboard() {
                 }
                 className="appearance-none rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 pr-10 text-sm"
               >
-                {scenarios.map((s) => (
-                  <option
-                    key={s.id}
-                    value={s.id}
-                  >
-                    {s.name}
-                  </option>
-                ))}
+
+                {scenarios.map(
+                  (s) => (
+                    <option
+                      key={s.id}
+                      value={s.id}
+                    >
+                      {s.name}
+                    </option>
+                  ),
+                )}
+
               </select>
 
               <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4" />
 
             </label>
 
-            {/* RUN INVESTIGATION */}
+            {/* RUN BUTTON */}
 
             <button
               onClick={run}
               disabled={running}
               className="flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60"
             >
+
               <Sparkles className="h-4 w-4" />
 
               {running
                 ? "Agents Running..."
                 : "Run AI Investigation"}
+
             </button>
 
           </div>
 
         </header>
+
+        {/* =====================================================
+            SYSTEM STATUS
+        ====================================================== */}
+
+        <section className="mb-6 grid gap-3 sm:grid-cols-3">
+
+          <div className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] px-4 py-3">
+
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
+
+            <div>
+              <p className="text-xs font-semibold text-emerald-300">
+                AI AGENTS ONLINE
+              </p>
+
+              <p className="text-[11px] text-slate-500">
+                Multi-agent workflow ready
+              </p>
+            </div>
+
+          </div>
+
+          <div className="flex items-center gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[.04] px-4 py-3">
+
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-400" />
+
+            <div>
+              <p className="text-xs font-semibold text-cyan-300">
+                BACKEND CONNECTED
+              </p>
+
+              <p className="text-[11px] text-slate-500">
+                Investigation API ready
+              </p>
+            </div>
+
+          </div>
+
+          <div className="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[.04] px-4 py-3">
+
+            <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
+
+            <div>
+              <p className="text-xs font-semibold text-amber-300">
+                HUMAN APPROVAL ENABLED
+              </p>
+
+              <p className="text-[11px] text-slate-500">
+                High-impact actions require approval
+              </p>
+            </div>
+
+          </div>
+
+        </section>
 
         {/* =====================================================
             SIGNAL CARDS
@@ -318,7 +454,13 @@ export default function Dashboard() {
         <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
 
           {cards.map(
-            ([title, value, subtitle, IconComponent]) => {
+            ([
+              title,
+              value,
+              subtitle,
+              IconComponent,
+            ]) => {
+
               const Icon =
                 IconComponent as React.ElementType;
 
@@ -432,30 +574,39 @@ export default function Dashboard() {
                   "Supplier exposure",
                   `${scenario.supplier.delayDays} days`,
                 ],
+
                 [
                   "Stock coverage",
                   `${scenario.inventory.daysRemaining} days`,
                 ],
+
                 [
                   "Demand pressure",
                   scenario.demand.level,
                 ],
+
                 [
                   "Inbound logistics",
                   scenario.logistics.status,
                 ],
               ].map(
                 ([label, value]) => (
+
                   <div
                     key={label}
                     className="flex justify-between rounded-xl border border-white/10 px-4 py-3 text-sm"
                   >
+
                     <span className="text-slate-400">
                       {label}
                     </span>
 
-                    <b>{value}</b>
+                    <b>
+                      {value}
+                    </b>
+
                   </div>
+
                 ),
               )}
 
@@ -464,6 +615,7 @@ export default function Dashboard() {
             {/* BUSINESS IMPACT */}
 
             {analysis && (
+
               <div className="mt-7 rounded-2xl border border-cyan-400/20 bg-cyan-400/[.04] p-5">
 
                 <div className="flex gap-2 text-sm font-semibold text-cyan-300">
@@ -479,6 +631,7 @@ export default function Dashboard() {
                 </p>
 
               </div>
+
             )}
 
           </div>
@@ -507,11 +660,80 @@ export default function Dashboard() {
 
             </div>
 
+            {/* LIVE AGENT STATUS */}
+
+            {running && (
+
+              <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/[.04] p-4">
+
+                <div className="flex items-center gap-3">
+
+                  <div className="relative">
+
+                    <div className="h-3 w-3 animate-ping rounded-full bg-cyan-400" />
+
+                    <div className="absolute inset-0 h-3 w-3 rounded-full bg-cyan-400" />
+
+                  </div>
+
+                  <div>
+
+                    <p className="text-sm font-semibold text-cyan-300">
+                      Agent workflow running
+                    </p>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      Active: {activeAgent}
+                    </p>
+
+                  </div>
+
+                </div>
+
+                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-800">
+
+                  <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-400" />
+
+                </div>
+
+              </div>
+
+            )}
+
+            {/* CURRENT AGENT */}
+
+            {!running &&
+              analysis && (
+
+                <div className="mt-6 rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] px-4 py-3">
+
+                  <div className="flex items-center gap-2">
+
+                    <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+
+                    <span className="text-sm font-semibold text-emerald-300">
+                      Investigation Complete
+                    </span>
+
+                  </div>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    All agents completed their analysis.
+                  </p>
+
+                </div>
+
+              )}
+
+            {/* TIMELINE */}
+
             <div className="mt-6 space-y-4">
 
               {analysis ? (
+
                 analysis.steps.map(
                   (step, index) => (
+
                     <div
                       key={`${step.agent}-${index}`}
                       className="flex gap-3"
@@ -533,12 +755,18 @@ export default function Dashboard() {
 
                           {step.status ===
                           "warning" ? (
+
                             <AlertTriangle className="h-4 w-4" />
+
                           ) : step.status ===
                             "recommendation" ? (
+
                             <Sparkles className="h-4 w-4" />
+
                           ) : (
+
                             <CheckCircle2 className="h-4 w-4" />
+
                           )}
 
                         </div>
@@ -547,7 +775,9 @@ export default function Dashboard() {
                           analysis.steps
                             .length -
                             1 && (
+
                           <div className="mt-1 h-7 w-px bg-white/10" />
+
                         )}
 
                       </div>
@@ -565,15 +795,20 @@ export default function Dashboard() {
                       </div>
 
                     </div>
+
                   ),
                 )
+
               ) : (
+
                 <div className="rounded-xl border border-dashed border-white/10 p-6 text-sm text-slate-500">
 
-                  Run the investigation to execute the
-                  multi-step agent workflow.
+                  {running
+                    ? "Agents are processing the supply-chain signals..."
+                    : "Run the investigation to execute the multi-step agent workflow."}
 
                 </div>
+
               )}
 
             </div>
@@ -612,6 +847,7 @@ export default function Dashboard() {
 
               {scenario.alternatives.map(
                 (alternative) => (
+
                   <div
                     key={alternative.name}
                     className={`rounded-xl border p-4 ${
@@ -631,20 +867,27 @@ export default function Dashboard() {
                         </b>
 
                         <p className="mt-1 text-xs text-slate-500">
-                          {alternative.quantity.toLocaleString()}{" "}
+
+                          {alternative.quantity.toLocaleString()}
+                          {" "}
                           units
+
                           {" • "}
+
                           {alternative.reliability}%
                           reliability
+
                         </p>
 
                       </div>
 
                       {analysis?.recommendedSupplier ===
                         alternative.name && (
+
                         <span className="rounded-full bg-cyan-400/10 px-2.5 py-1 text-xs text-cyan-300">
                           Recommended
                         </span>
+
                       )}
 
                     </div>
@@ -656,13 +899,13 @@ export default function Dashboard() {
                       </span>
 
                       <span>
-                        +{alternative.costIncrease}%
-                        cost
+                        +{alternative.costIncrease}% cost
                       </span>
 
                     </div>
 
                   </div>
+
                 ),
               )}
 
@@ -687,6 +930,7 @@ export default function Dashboard() {
             </div>
 
             {analysis ? (
+
               <>
 
                 {/* RECOMMENDATION */}
@@ -715,6 +959,7 @@ export default function Dashboard() {
 
                     {analysis.reasoning.map(
                       (reason) => (
+
                         <li
                           key={reason}
                           className="flex gap-2 text-sm leading-6 text-slate-400"
@@ -725,6 +970,7 @@ export default function Dashboard() {
                           {reason}
 
                         </li>
+
                       ),
                     )}
 
@@ -757,13 +1003,17 @@ export default function Dashboard() {
                       "HIGH" ||
                     analysis.risk ===
                       "CRITICAL" ? (
+
                       <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-300">
                         Approval Required
                       </span>
+
                     ) : (
+
                       <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
                         Low Impact
                       </span>
+
                     )}
 
                   </div>
@@ -816,12 +1066,11 @@ export default function Dashboard() {
 
                   </div>
 
-                  {/* =================================================
-                      APPROVAL RESULT
-                  ================================================== */}
+                  {/* APPROVED */}
 
                   {approvalStatus ===
                     "APPROVED" && (
+
                     <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/[.05] px-4 py-4">
 
                       <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
@@ -850,12 +1099,14 @@ export default function Dashboard() {
                       </div>
 
                     </div>
+
                   )}
 
                   {/* REJECTED */}
 
                   {approvalStatus ===
                     "REJECTED" && (
+
                     <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/[.05] px-4 py-4">
 
                       <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
@@ -871,12 +1122,14 @@ export default function Dashboard() {
                       </p>
 
                     </div>
+
                   )}
 
                   {/* ERROR */}
 
                   {approvalStatus ===
                     "ERROR" && (
+
                     <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/[.05] px-4 py-4">
 
                       <div className="flex items-center gap-2 text-sm font-semibold text-amber-300">
@@ -892,18 +1145,22 @@ export default function Dashboard() {
                       </p>
 
                     </div>
+
                   )}
 
                 </div>
 
               </>
+
             ) : (
+
               <div className="mt-5 rounded-2xl border border-dashed border-white/10 p-7 text-sm text-slate-500">
 
                 Decision Agent output will appear after
                 investigation.
 
               </div>
+
             )}
 
           </div>
@@ -928,6 +1185,7 @@ export default function Dashboard() {
         </footer>
 
       </div>
+
     </main>
   );
 }
