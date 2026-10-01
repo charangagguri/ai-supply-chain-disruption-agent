@@ -1,201 +1,301 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 import {
+  Activity,
   AlertTriangle,
-  ArrowRight,
   Bot,
+  Check,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   Factory,
   Gauge,
-  PackageSearch,
+  Package,
+  RefreshCw,
   Route,
   ShieldCheck,
   Sparkles,
   Truck,
-  XCircle,
+  UserCheck,
+  X,
+  Zap,
 } from "lucide-react";
 
+import { useState } from "react";
 import { scenarios, Scenario } from "@/data/scenarios";
-import { Analysis } from "@/lib/agent";
+
+type RiskLevel =
+  | "LOW"
+  | "MEDIUM"
+  | "HIGH"
+  | "CRITICAL";
+
+type AgentStep = {
+  agent: string;
+  status:
+    | "completed"
+    | "warning"
+    | "recommendation";
+  message: string;
+};
+
+type Alternative = {
+  name: string;
+  deliveryDays: number;
+  costIncrease: number;
+  quantity: number;
+  reliability: number;
+  evaluationScore?: number;
+};
+
+type Analysis = {
+  risk: RiskLevel;
+  riskScore: number;
+  impact: string;
+  shortageRisk: string;
+  recommendedSupplier: string;
+  recommendation: string;
+  reasoning: string[];
+  steps: AgentStep[];
+};
+
+type SimulationData = {
+  supplier: {
+    name: string;
+    status: "Delayed" | "On Time";
+    delayDays: number;
+    reliability: number;
+  };
+
+  inventory: {
+    product: string;
+    units: number;
+    daysRemaining: number;
+  };
+
+  demand: {
+    level: "Low" | "Medium" | "High";
+    dailyUnits: number;
+  };
+
+  logistics: {
+    status: "Delayed" | "Normal";
+    delayDays: number;
+  };
+};
+
+type ExecutionResult = {
+  success: boolean;
+  executionStatus?: string;
+  supplier?: string;
+  quantity?: number;
+  message?: string;
+
+  purchaseOrder?: {
+    status: string;
+    supplier: string;
+    quantity: number;
+    priority: string;
+  };
+
+  inventoryReservation?: {
+    status: string;
+    quantity: number;
+  };
+
+  logisticsPlan?: {
+    status: string;
+    supplier: string;
+  };
+
+  executionSteps?: Array<{
+    step: number;
+    agent: string;
+    action: string;
+    status: string;
+    message: string;
+  }>;
+};
 
 type ApprovalStatus =
   | "PENDING"
   | "APPROVING"
   | "APPROVED"
+  | "REJECTING"
   | "REJECTED"
   | "ERROR";
 
-export default function Dashboard() {
-  const [scenarioId, setScenarioId] =
-    useState("critical-delay");
+const riskClasses: Record<RiskLevel, string> = {
+  LOW: "text-emerald-400",
+  MEDIUM: "text-yellow-400",
+  HIGH: "text-orange-400",
+  CRITICAL: "text-red-400",
+};
 
-  const [scenario, setScenario] =
-    useState<Scenario>(scenarios[0]);
+const riskBorderClasses: Record<RiskLevel, string> = {
+  LOW: "border-emerald-500/30",
+  MEDIUM: "border-yellow-500/30",
+  HIGH: "border-orange-500/30",
+  CRITICAL: "border-red-500/30",
+};
+
+export default function Dashboard() {
+  const [selectedScenarioId, setSelectedScenarioId] =
+    useState("critical-delay");
 
   const [analysis, setAnalysis] =
     useState<Analysis | null>(null);
 
-  const [running, setRunning] =
+  const [simulation, setSimulation] =
+    useState<SimulationData | null>(null);
+
+  const [alternatives, setAlternatives] =
+    useState<Alternative[]>([]);
+
+  const [loading, setLoading] =
     useState(false);
 
-  const [activeAgent, setActiveAgent] =
-    useState("Preparing agents...");
+  const [simulating, setSimulating] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
 
   const [approvalStatus, setApprovalStatus] =
     useState<ApprovalStatus>("PENDING");
 
-  const [approvalMessage, setApprovalMessage] =
-    useState("");
+  const [execution, setExecution] =
+    useState<ExecutionResult | null>(null);
 
-  const [executionStatus, setExecutionStatus] =
-    useState("");
+  const selectedScenario =
+    scenarios.find(
+      (scenario) =>
+        scenario.id === selectedScenarioId
+    ) || scenarios[0];
 
-  /*
-   * ============================================================
-   * SCENARIO CHANGE
-   * ============================================================
-   */
+  const currentSupplier =
+    simulation?.supplier ||
+    selectedScenario.supplier;
 
-  useEffect(() => {
-    setScenario(
-      scenarios.find(
-        (s) => s.id === scenarioId,
-      ) ?? scenarios[0],
-    );
+  const currentInventory =
+    simulation?.inventory ||
+    selectedScenario.inventory;
 
-    setAnalysis(null);
+  const currentDemand =
+    simulation?.demand ||
+    selectedScenario.demand;
 
+  const currentLogistics =
+    simulation?.logistics ||
+    selectedScenario.logistics;
+
+  const runInvestigation = async () => {
+    setLoading(true);
+    setError("");
+    setExecution(null);
     setApprovalStatus("PENDING");
-    setApprovalMessage("");
-    setExecutionStatus("");
-
-    setActiveAgent(
-      "Preparing agents...",
-    );
-  }, [scenarioId]);
-
-  /*
-   * ============================================================
-   * RUN AI INVESTIGATION
-   * ============================================================
-   */
-
-  async function run() {
-    setRunning(true);
-
-    setAnalysis(null);
-
-    setApprovalStatus("PENDING");
-    setApprovalMessage("");
-    setExecutionStatus("");
-
-    const agentSteps = [
-      "Supplier Agent",
-      "Inventory Agent",
-      "Demand Agent",
-      "Logistics Agent",
-      "Risk Agent",
-      "Impact Agent",
-      "Alternative Supplier Agent",
-      "Decision Agent",
-    ];
-
-    let stepIndex = 0;
-
-    setActiveAgent(agentSteps[0]);
-
-    const agentTimer =
-      setInterval(() => {
-        stepIndex++;
-
-        if (
-          stepIndex <
-          agentSteps.length
-        ) {
-          setActiveAgent(
-            agentSteps[stepIndex],
-          );
-        }
-      }, 650);
 
     try {
       const response = await fetch(
         "/api/investigate",
         {
           method: "POST",
-
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
-
           body: JSON.stringify({
-            scenarioId,
+            scenarioId:
+              selectedScenarioId,
           }),
-        },
+        }
       );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         throw new Error(
-          data?.error ||
-            "Investigation failed",
+          data.error ||
+            "Investigation failed."
         );
       }
 
-      setScenario(data.scenario);
-
       setAnalysis(data.analysis);
 
-      setActiveAgent(
-        "Investigation Complete",
-      );
-    } catch (error) {
-      console.error(
-        "Investigation error:",
-        error,
+      setAlternatives(
+        data.investigation?.alternatives ||
+          selectedScenario.alternatives
       );
 
-      setActiveAgent(
-        "Investigation Failed",
-      );
+      setApprovalStatus("PENDING");
+    } catch (err) {
+      console.error(err);
 
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Unable to run AI investigation.",
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Investigation failed."
       );
     } finally {
-      clearInterval(agentTimer);
-
-      setRunning(false);
+      setLoading(false);
     }
-  }
+  };
 
-  /*
-   * ============================================================
-   * HUMAN APPROVAL
-   * ============================================================
-   */
+  const simulateDisruption = async () => {
+    setSimulating(true);
+    setError("");
 
-  async function handleApproval(
-    approved: boolean,
-  ) {
+    try {
+      const response = await fetch(
+        "/api/simulate",
+        {
+          method: "GET",
+          cache: "no-store",
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.error ||
+            "Simulation failed."
+        );
+      }
+
+      setSimulation(data.data);
+
+      setAnalysis(null);
+      setExecution(null);
+      setApprovalStatus("PENDING");
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Simulation failed."
+      );
+    } finally {
+      setSimulating(false);
+    }
+  };
+
+  const handleApproval = async (
+    approved: boolean
+  ) => {
     if (!analysis) {
+      setError(
+        "Run AI Investigation before approval."
+      );
       return;
     }
 
-    setApprovalStatus("APPROVING");
+    setError("");
 
-    setApprovalMessage("");
-
-    setExecutionStatus("");
+    setApprovalStatus(
+      approved
+        ? "APPROVING"
+        : "REJECTING"
+    );
 
     try {
       const response = await fetch(
@@ -209,983 +309,1309 @@ export default function Dashboard() {
           },
 
           body: JSON.stringify({
-            scenarioId,
+            approved,
 
-            action:
+            scenarioId:
+              selectedScenarioId,
+
+            supplier:
+              analysis.recommendedSupplier,
+
+            recommendation:
               analysis.recommendation,
 
-            approved,
+            action: approved
+              ? "EXECUTE_MITIGATION"
+              : "REJECT_MITIGATION",
           }),
-        },
+        }
       );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         throw new Error(
-          data?.error ||
-            "Approval request failed",
+          data.error ||
+            "Approval failed."
         );
       }
 
       if (approved) {
-        setApprovalStatus(
-          "APPROVED",
-        );
-
-        setApprovalMessage(
-          data?.message ||
-            "Human approval recorded.",
-        );
-
-        setExecutionStatus(
-          data?.execution?.status ||
-            "READY_FOR_EXECUTION",
-        );
+        setApprovalStatus("APPROVED");
       } else {
-        setApprovalStatus(
-          "REJECTED",
-        );
-
-        setApprovalMessage(
-          data?.message ||
-            "Mitigation action was rejected.",
-        );
-
-        setExecutionStatus("");
+        setApprovalStatus("REJECTED");
       }
-    } catch (error) {
-      console.error(
-        "Approval error:",
-        error,
-      );
+    } catch (err) {
+      console.error(err);
 
       setApprovalStatus("ERROR");
 
-      setApprovalMessage(
-        error instanceof Error
-          ? error.message
-          : "Approval request failed.",
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Approval failed."
       );
     }
-  }
+  };
 
-  /*
-   * ============================================================
-   * SIGNAL CARDS
-   * ============================================================
-   */
+  const executeMitigation = async () => {
+    if (!analysis) {
+      setError(
+        "Run AI Investigation first."
+      );
+      return;
+    }
 
-  const cards = [
-    [
-      "Supplier",
-      scenario.supplier.status,
-      `${scenario.supplier.name} • ${scenario.supplier.delayDays}d delay`,
-      Factory,
-    ],
+    if (
+      approvalStatus !== "APPROVED"
+    ) {
+      setError(
+        "Human approval is required before execution."
+      );
+      return;
+    }
 
-    [
-      "Inventory",
-      `${scenario.inventory.daysRemaining} days`,
-      `${scenario.inventory.units.toLocaleString()} units available`,
-      PackageSearch,
-    ],
+    setError("");
+    setExecution(null);
 
-    [
-      "Demand",
-      scenario.demand.level,
-      `${scenario.demand.dailyUnits.toLocaleString()} units/day`,
-      Gauge,
-    ],
+    try {
+      const recommended =
+        alternatives.find(
+          (supplier) =>
+            supplier.name ===
+            analysis.recommendedSupplier
+        );
 
-    [
-      "Logistics",
-      scenario.logistics.status,
-      `${scenario.logistics.delayDays}d inbound delay`,
-      Truck,
-    ],
-  ];
+      const quantity =
+        recommended?.quantity || 5000;
+
+      const response = await fetch(
+        "/api/execute",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            scenarioId:
+              selectedScenarioId,
+
+            supplier:
+              analysis.recommendedSupplier,
+
+            action:
+              "PREPARE_MITIGATION_ORDER",
+
+            quantity,
+          }),
+        }
+      );
+
+      const data =
+        (await response.json()) as ExecutionResult;
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message ||
+            "Execution failed."
+        );
+      }
+
+      setExecution(data);
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Execution failed."
+      );
+    }
+  };
+
+  const risk =
+    analysis?.risk || "LOW";
 
   return (
-    <main className="min-h-screen grid-bg">
+    <main className="min-h-screen bg-[#06101f] text-white">
+      <div className="mx-auto max-w-[1600px] px-6 py-7">
 
-      <div className="mx-auto max-w-[1500px] px-5 py-6 md:px-8">
+        {/* HEADER */}
+        <header className="mb-8 rounded-2xl border border-slate-700/70 bg-slate-900/60 p-7 shadow-2xl">
 
-        {/* =====================================================
-            HEADER
-        ====================================================== */}
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
 
-        <header className="mb-7 flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[.035] p-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-4">
 
-          <div className="flex items-center gap-3">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-500/15 text-cyan-400">
+                <Bot className="h-7 w-7" />
+              </div>
 
-            <div className="rounded-xl bg-cyan-400/10 p-2 text-cyan-300">
-              <Bot />
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+                  Supply Chain AI Control Center
+                </h1>
+
+                <p className="mt-1 text-sm text-slate-400">
+                  Agentic disruption detection &
+                  response
+                </p>
+              </div>
+
             </div>
 
-            <div>
-
-              <h1 className="text-xl font-bold">
-                Supply Chain AI Control Center
-              </h1>
-
-              <p className="text-sm text-slate-400">
-                Agentic disruption detection & response
-              </p>
-
-            </div>
-
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-
-            {/* SCENARIO SELECTOR */}
-
-            <label className="relative">
+            <div className="flex flex-col gap-3 sm:flex-row">
 
               <select
-                value={scenarioId}
-                onChange={(e) =>
-                  setScenarioId(
-                    e.target.value,
-                  )
-                }
-                className="appearance-none rounded-xl border border-white/10 bg-slate-900 px-4 py-2.5 pr-10 text-sm"
+                value={selectedScenarioId}
+                onChange={(event) => {
+                  setSelectedScenarioId(
+                    event.target.value
+                  );
+
+                  setAnalysis(null);
+                  setExecution(null);
+                  setSimulation(null);
+                  setApprovalStatus(
+                    "PENDING"
+                  );
+                }}
+                className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-medium outline-none focus:border-cyan-400"
               >
-
                 {scenarios.map(
-                  (s) => (
+                  (scenario) => (
                     <option
-                      key={s.id}
-                      value={s.id}
+                      key={scenario.id}
+                      value={scenario.id}
                     >
-                      {s.name}
+                      {scenario.name}
                     </option>
-                  ),
+                  )
                 )}
-
               </select>
 
-              <ChevronDown className="pointer-events-none absolute right-3 top-3 h-4 w-4" />
+              <button
+                onClick={
+                  runInvestigation
+                }
+                disabled={loading}
+                className="flex items-center justify-center gap-2 rounded-xl bg-cyan-400 px-6 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Sparkles className="h-4 w-4" />
 
-            </label>
+                {loading
+                  ? "Investigating..."
+                  : "Run AI Investigation"}
+              </button>
 
-            {/* RUN BUTTON */}
+            </div>
+          </div>
+        </header>
+
+        {/* STATUS BAR */}
+        <section className="mb-8 grid gap-4 md:grid-cols-3">
+
+          <StatusCard
+            icon={
+              <Activity className="h-5 w-5" />
+            }
+            title="AI AGENTS ONLINE"
+            subtitle="Multi-agent workflow ready"
+            type="green"
+          />
+
+          <StatusCard
+            icon={
+              <Zap className="h-5 w-5" />
+            }
+            title="BACKEND CONNECTED"
+            subtitle="Investigation & execution APIs ready"
+            type="cyan"
+          />
+
+          <StatusCard
+            icon={
+              <UserCheck className="h-5 w-5" />
+            }
+            title="HUMAN APPROVAL ENABLED"
+            subtitle="High-impact actions require approval"
+            type="yellow"
+          />
+
+        </section>
+
+        {/* ERROR */}
+        {error && (
+          <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-red-300">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+
+            <div>
+              <p className="font-semibold">
+                System Error
+              </p>
+
+              <p className="mt-1 text-sm">
+                {error}
+              </p>
+            </div>
 
             <button
-              onClick={run}
-              disabled={running}
-              className="flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-2.5 text-sm font-bold text-slate-950 disabled:opacity-60"
+              onClick={() =>
+                setError("")
+              }
+              className="ml-auto"
             >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
 
-              <Sparkles className="h-4 w-4" />
+        {/* LIVE MONITOR */}
+        <section className="mb-8 rounded-2xl border border-cyan-500/30 bg-[#071827] p-7">
 
-              {running
-                ? "Agents Running..."
-                : "Run AI Investigation"}
+          <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
+            <div>
+              <div className="flex items-center gap-3">
+                <RefreshCw className="h-6 w-6 text-cyan-400" />
+
+                <h2 className="text-2xl font-bold">
+                  Live Supply Chain Monitor
+                </h2>
+              </div>
+
+              <p className="mt-1 text-sm text-slate-400">
+                Simulated supplier, inventory,
+                demand and logistics signals
+              </p>
+            </div>
+
+            <button
+              onClick={
+                simulateDisruption
+              }
+              disabled={simulating}
+              className="flex items-center justify-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 font-semibold text-cyan-300 transition hover:bg-cyan-500/20 disabled:opacity-50"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  simulating
+                    ? "animate-spin"
+                    : ""
+                }`}
+              />
+
+              {simulating
+                ? "Simulating..."
+                : "Simulate New Disruption"}
             </button>
 
           </div>
 
-        </header>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
 
-        {/* =====================================================
-            SYSTEM STATUS
-        ====================================================== */}
+            <MonitorCard
+              icon={
+                <Factory className="h-5 w-5" />
+              }
+              label="SUPPLIER"
+              title={
+                currentSupplier.name
+              }
+              value={
+                currentSupplier.status
+              }
+              detail={`${currentSupplier.delayDays} day delay • ${currentSupplier.reliability}% reliability`}
+              warning={
+                currentSupplier.status ===
+                "Delayed"
+              }
+            />
 
-        <section className="mb-6 grid gap-3 sm:grid-cols-3">
+            <MonitorCard
+              icon={
+                <Package className="h-5 w-5" />
+              }
+              label="INVENTORY"
+              title={
+                currentInventory.product
+              }
+              value={`${currentInventory.units.toLocaleString()} units`}
+              detail={`${currentInventory.daysRemaining} days coverage`}
+            />
 
-          <div className="flex items-center gap-3 rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] px-4 py-3">
+            <MonitorCard
+              icon={
+                <Gauge className="h-5 w-5" />
+              }
+              label="DEMAND"
+              title={
+                currentDemand.level
+              }
+              value={`${currentDemand.dailyUnits.toLocaleString()} units/day`}
+              detail="Current market pressure"
+              warning={
+                currentDemand.level ===
+                "High"
+              }
+            />
 
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400" />
-
-            <div>
-              <p className="text-xs font-semibold text-emerald-300">
-                AI AGENTS ONLINE
-              </p>
-
-              <p className="text-[11px] text-slate-500">
-                Multi-agent workflow ready
-              </p>
-            </div>
+            <MonitorCard
+              icon={
+                <Truck className="h-5 w-5" />
+              }
+              label="LOGISTICS"
+              title={
+                currentLogistics.status
+              }
+              value={`${currentLogistics.delayDays} day delay`}
+              detail="Transportation signal"
+              warning={
+                currentLogistics.status ===
+                "Delayed"
+              }
+            />
 
           </div>
 
-          <div className="flex items-center gap-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[.04] px-4 py-3">
-
-            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-400" />
-
-            <div>
-              <p className="text-xs font-semibold text-cyan-300">
-                BACKEND CONNECTED
-              </p>
-
-              <p className="text-[11px] text-slate-500">
-                Investigation API ready
-              </p>
+          {simulation && (
+            <div className="mt-5 flex items-center gap-2 text-sm text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" />
+              Live simulation data received
+              from{" "}
+              <span className="font-mono">
+                /api/simulate
+              </span>
             </div>
-
-          </div>
-
-          <div className="flex items-center gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[.04] px-4 py-3">
-
-            <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-
-            <div>
-              <p className="text-xs font-semibold text-amber-300">
-                HUMAN APPROVAL ENABLED
-              </p>
-
-              <p className="text-[11px] text-slate-500">
-                High-impact actions require approval
-              </p>
-            </div>
-
-          </div>
-
-        </section>
-
-        {/* =====================================================
-            SIGNAL CARDS
-        ====================================================== */}
-
-        <section className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-
-          {cards.map(
-            ([
-              title,
-              value,
-              subtitle,
-              IconComponent,
-            ]) => {
-
-              const Icon =
-                IconComponent as React.ElementType;
-
-              return (
-                <div
-                  key={title as string}
-                  className="rounded-2xl border border-white/10 bg-white/[.035] p-5"
-                >
-
-                  <div className="mb-5 flex justify-between text-sm text-slate-400">
-
-                    {title}
-
-                    <span className="text-cyan-300">
-                      <Icon />
-                    </span>
-
-                  </div>
-
-                  <div className="text-2xl font-bold">
-                    {value as string}
-                  </div>
-
-                  <div className="mt-1 text-xs text-slate-500">
-                    {subtitle as string}
-                  </div>
-
-                </div>
-              );
-            },
           )}
 
         </section>
 
-        {/* =====================================================
-            RISK + AGENT ACTIVITY
-        ====================================================== */}
-
-        <section className="grid gap-6 xl:grid-cols-[1.25fr_.75fr]">
-
-          {/* ===================================================
-              RISK INTELLIGENCE
-          ==================================================== */}
-
-          <div className="rounded-2xl border border-white/10 bg-white/[.035] p-6">
-
-            <div className="flex justify-between">
-
-              <div>
-
-                <p className="text-xs uppercase tracking-[.2em] text-slate-500">
-                  Risk intelligence
-                </p>
-
-                <h2 className="mt-2 text-3xl font-bold">
-                  {analysis?.risk ??
-                    "READY"}
-                </h2>
-
-                <p className="mt-1 text-sm text-slate-400">
-                  {analysis
-                    ? "Analysis complete"
-                    : "Run investigation to correlate signals"}
-                </p>
-
-              </div>
-
-              <div className="rounded-xl border border-white/10 px-4 py-3 text-right">
-
-                <p className="text-xs text-slate-500">
-                  Risk score
-                </p>
-
-                <p className="text-2xl font-bold">
-
-                  {analysis?.riskScore ??
-                    0}
-
-                  <span className="text-sm text-slate-500">
-                    /100
-                  </span>
-
-                </p>
-
-              </div>
-
-            </div>
-
-            {/* RISK BAR */}
-
-            <div className="mt-7 h-3 overflow-hidden rounded-full bg-slate-800">
-
-              <div
-                className="h-full rounded-full bg-cyan-400 transition-all duration-700"
-                style={{
-                  width: `${
-                    analysis?.riskScore ??
-                    0
-                  }%`,
-                }}
-              />
-
-            </div>
-
-            {/* SIGNAL SUMMARY */}
-
-            <div className="mt-7 grid gap-3 md:grid-cols-2">
-
-              {[
-                [
-                  "Supplier exposure",
-                  `${scenario.supplier.delayDays} days`,
-                ],
-
-                [
-                  "Stock coverage",
-                  `${scenario.inventory.daysRemaining} days`,
-                ],
-
-                [
-                  "Demand pressure",
-                  scenario.demand.level,
-                ],
-
-                [
-                  "Inbound logistics",
-                  scenario.logistics.status,
-                ],
-              ].map(
-                ([label, value]) => (
-
-                  <div
-                    key={label}
-                    className="flex justify-between rounded-xl border border-white/10 px-4 py-3 text-sm"
-                  >
-
-                    <span className="text-slate-400">
-                      {label}
-                    </span>
-
-                    <b>
-                      {value}
-                    </b>
-
-                  </div>
-
-                ),
-              )}
-
-            </div>
-
-            {/* BUSINESS IMPACT */}
-
-            {analysis && (
-
-              <div className="mt-7 rounded-2xl border border-cyan-400/20 bg-cyan-400/[.04] p-5">
-
-                <div className="flex gap-2 text-sm font-semibold text-cyan-300">
-
-                  <ShieldCheck className="h-4 w-4" />
-
-                  Business impact
-
-                </div>
-
-                <p className="mt-2 text-sm leading-6 text-slate-300">
-                  {analysis.impact}
-                </p>
-
-              </div>
-
-            )}
-
-          </div>
-
-          {/* ===================================================
-              AGENT ACTIVITY
-          ==================================================== */}
-
-          <div className="rounded-2xl border border-white/10 bg-white/[.035] p-6">
-
-            <div className="flex justify-between">
-
-              <div>
-
-                <p className="text-xs uppercase tracking-[.2em] text-slate-500">
-                  Agent activity
-                </p>
-
-                <h2 className="mt-2 text-xl font-bold">
-                  Investigation timeline
-                </h2>
-
-              </div>
-
-              <Clock3 />
-
-            </div>
-
-            {/* LIVE AGENT STATUS */}
-
-            {running && (
-
-              <div className="mt-6 rounded-2xl border border-cyan-400/20 bg-cyan-400/[.04] p-4">
-
-                <div className="flex items-center gap-3">
-
-                  <div className="relative">
-
-                    <div className="h-3 w-3 animate-ping rounded-full bg-cyan-400" />
-
-                    <div className="absolute inset-0 h-3 w-3 rounded-full bg-cyan-400" />
-
-                  </div>
-
-                  <div>
-
-                    <p className="text-sm font-semibold text-cyan-300">
-                      Agent workflow running
-                    </p>
-
-                    <p className="mt-1 text-xs text-slate-500">
-                      Active: {activeAgent}
-                    </p>
-
-                  </div>
-
-                </div>
-
-                <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-800">
-
-                  <div className="h-full w-1/2 animate-pulse rounded-full bg-cyan-400" />
-
-                </div>
-
-              </div>
-
-            )}
-
-            {/* CURRENT AGENT */}
-
-            {!running &&
-              analysis && (
-
-                <div className="mt-6 rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] px-4 py-3">
-
-                  <div className="flex items-center gap-2">
-
-                    <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-
-                    <span className="text-sm font-semibold text-emerald-300">
-                      Investigation Complete
-                    </span>
-
-                  </div>
-
-                  <p className="mt-1 text-xs text-slate-500">
-                    All agents completed their analysis.
-                  </p>
-
-                </div>
-
-              )}
-
-            {/* TIMELINE */}
-
-            <div className="mt-6 space-y-4">
-
-              {analysis ? (
-
-                analysis.steps.map(
-                  (step, index) => (
-
-                    <div
-                      key={`${step.agent}-${index}`}
-                      className="flex gap-3"
-                    >
-
-                      <div className="flex flex-col items-center">
-
-                        <div
-                          className={`rounded-full p-2 ${
-                            step.status ===
-                            "warning"
-                              ? "bg-amber-400/10 text-amber-300"
-                              : step.status ===
-                                  "recommendation"
-                                ? "bg-cyan-400/10 text-cyan-300"
-                                : "bg-emerald-400/10 text-emerald-300"
-                          }`}
-                        >
-
-                          {step.status ===
-                          "warning" ? (
-
-                            <AlertTriangle className="h-4 w-4" />
-
-                          ) : step.status ===
-                            "recommendation" ? (
-
-                            <Sparkles className="h-4 w-4" />
-
-                          ) : (
-
-                            <CheckCircle2 className="h-4 w-4" />
-
-                          )}
-
-                        </div>
-
-                        {index <
-                          analysis.steps
-                            .length -
-                            1 && (
-
-                          <div className="mt-1 h-7 w-px bg-white/10" />
-
-                        )}
-
-                      </div>
-
-                      <div>
-
-                        <p className="text-sm font-semibold">
-                          {step.agent}
-                        </p>
-
-                        <p className="mt-1 text-xs leading-5 text-slate-500">
-                          {step.message}
-                        </p>
-
-                      </div>
-
-                    </div>
-
-                  ),
-                )
-
-              ) : (
-
-                <div className="rounded-xl border border-dashed border-white/10 p-6 text-sm text-slate-500">
-
-                  {running
-                    ? "Agents are processing the supply-chain signals..."
-                    : "Run the investigation to execute the multi-step agent workflow."}
-
-                </div>
-
-              )}
-
-            </div>
-
-          </div>
+        {/* BASIC SIGNAL CARDS */}
+        <section className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+
+          <SignalCard
+            title="Supplier"
+            value={
+              currentSupplier.status
+            }
+            detail={`${currentSupplier.name} • ${currentSupplier.delayDays}d delay`}
+            icon={
+              <Factory className="h-6 w-6" />
+            }
+          />
+
+          <SignalCard
+            title="Inventory"
+            value={`${currentInventory.daysRemaining} days`}
+            detail={`${currentInventory.units.toLocaleString()} units available`}
+            icon={
+              <Package className="h-6 w-6" />
+            }
+          />
+
+          <SignalCard
+            title="Demand"
+            value={
+              currentDemand.level
+            }
+            detail={`${currentDemand.dailyUnits.toLocaleString()} units/day`}
+            icon={
+              <Gauge className="h-6 w-6" />
+            }
+          />
+
+          <SignalCard
+            title="Logistics"
+            value={
+              currentLogistics.status
+            }
+            detail={`${currentLogistics.delayDays}d inbound delay`}
+            icon={
+              <Truck className="h-6 w-6" />
+            }
+          />
 
         </section>
 
-        {/* =====================================================
-            ALTERNATIVES + DECISION
-        ====================================================== */}
+        {/* ANALYSIS */}
+        {analysis && (
+          <>
+            <section className="mb-8 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-[.9fr_1.1fr]">
+              {/* RISK */}
+              <div
+                className={`rounded-2xl border ${riskBorderClasses[risk]} bg-slate-900/70 p-7`}
+              >
 
-          {/* ===================================================
-              ALTERNATIVE SUPPLIERS
-          ==================================================== */}
+                <div className="flex items-start justify-between">
 
-          <div className="rounded-2xl border border-white/10 bg-white/[.035] p-6">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      Risk Intelligence
+                    </p>
 
-            <div className="flex items-center gap-2">
+                    <h2
+                      className={`mt-2 text-4xl font-bold ${riskClasses[risk]}`}
+                    >
+                      {analysis.risk}
+                    </h2>
 
-              <Route className="text-cyan-300" />
-
-              <h2 className="text-xl font-bold">
-                Alternative suppliers
-              </h2>
-
-            </div>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Delivery • cost • quantity • reliability
-            </p>
-
-            <div className="mt-5 space-y-3">
-
-              {scenario.alternatives.map(
-                (alternative) => (
-
-                  <div
-                    key={alternative.name}
-                    className={`rounded-xl border p-4 ${
-                      analysis?.recommendedSupplier ===
-                      alternative.name
-                        ? "border-cyan-400/40 bg-cyan-400/[.05]"
-                        : "border-white/10"
-                    }`}
-                  >
-
-                    <div className="flex justify-between">
-
-                      <div>
-
-                        <b>
-                          {alternative.name}
-                        </b>
-
-                        <p className="mt-1 text-xs text-slate-500">
-
-                          {alternative.quantity.toLocaleString()}
-                          {" "}
-                          units
-
-                          {" • "}
-
-                          {alternative.reliability}%
-                          reliability
-
-                        </p>
-
-                      </div>
-
-                      {analysis?.recommendedSupplier ===
-                        alternative.name && (
-
-                        <span className="rounded-full bg-cyan-400/10 px-2.5 py-1 text-xs text-cyan-300">
-                          Recommended
-                        </span>
-
-                      )}
-
-                    </div>
-
-                    <div className="mt-3 flex gap-4 text-xs text-slate-400">
-
-                      <span>
-                        {alternative.deliveryDays} days
-                      </span>
-
-                      <span>
-                        +{alternative.costIncrease}% cost
-                      </span>
-
-                    </div>
-
+                    <p className="mt-1 text-sm text-slate-400">
+                      Analysis complete
+                    </p>
                   </div>
 
-                ),
-              )}
+                  <div className="rounded-xl border border-slate-700 bg-slate-950 px-5 py-4 text-center">
+                    <p className="text-xs text-slate-500">
+                      Risk score
+                    </p>
 
-            </div>
+                    <p className="mt-1 text-3xl font-bold">
+                      {analysis.riskScore}
+                      <span className="text-sm text-slate-500">
+                        /100
+                      </span>
+                    </p>
+                  </div>
 
-          </div>
+                </div>
 
-          {/* ===================================================
-              DECISION CENTER
-          ==================================================== */}
+                <div className="mt-7 h-3 overflow-hidden rounded-full bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-cyan-400 transition-all"
+                    style={{
+                      width: `${Math.min(
+                        analysis.riskScore,
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/[.035] p-6">
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
 
-            <div className="flex items-center gap-2">
+                  <MetricRow
+                    label="Supplier exposure"
+                    value={`${currentSupplier.delayDays} days`}
+                  />
 
-              <Sparkles className="text-cyan-300" />
+                  <MetricRow
+                    label="Stock coverage"
+                    value={`${currentInventory.daysRemaining} days`}
+                  />
 
-              <h2 className="text-xl font-bold">
-                Decision center
-              </h2>
+                  <MetricRow
+                    label="Demand pressure"
+                    value={currentDemand.level}
+                  />
 
-            </div>
+                  <MetricRow
+                    label="Inbound logistics"
+                    value={currentLogistics.status}
+                  />
 
-            {analysis ? (
+                </div>
 
-              <>
+                <div className="mt-6 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-5">
 
-                {/* RECOMMENDATION */}
+                  <div className="flex items-center gap-2 text-cyan-300">
+                    <ShieldCheck className="h-5 w-5" />
+                    <span className="font-bold">
+                      Business Impact
+                    </span>
+                  </div>
 
-                <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/[.04] p-5">
-
-                  <p className="text-xs uppercase tracking-[.18em] text-cyan-300">
-                    Next best action
+                  <p className="mt-3 leading-7 text-slate-200">
+                    {analysis.impact}
                   </p>
 
-                  <p className="mt-3 text-lg font-semibold leading-7">
+                  <p className="mt-2 text-sm text-slate-400">
+                    {analysis.shortageRisk}
+                  </p>
+
+                </div>
+
+              </div>
+
+              {/* AGENT TIMELINE */}
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-7">
+
+                <div className="mb-6 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Agent Activity
+                    </p>
+
+                    <h2 className="mt-2 text-2xl font-bold">
+                      Investigation Timeline
+                    </h2>
+                  </div>
+
+                  <Clock3 className="h-6 w-6 text-slate-400" />
+                </div>
+
+                <div className="space-y-4">
+
+                  <TimelineItem
+                    title="Investigation Complete"
+                    message="All agents completed their analysis."
+                    status="completed"
+                  />
+
+                  {analysis.steps.map(
+                    (step, index) => (
+                      <TimelineItem
+                        key={`${step.agent}-${index}`}
+                        title={step.agent}
+                        message={step.message}
+                        status={step.status}
+                      />
+                    )
+                  )}
+
+                </div>
+
+              </div>
+
+            </section>
+
+            {/* ALTERNATIVES + DECISION */}
+            <section className="mb-8 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+
+              {/* ALTERNATIVES */}
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-7">
+
+                <div className="mb-6 flex items-center gap-3">
+                  <Route className="h-6 w-6 text-cyan-400" />
+
+                  <div>
+                    <h2 className="text-2xl font-bold">
+                      Alternative Suppliers
+                    </h2>
+
+                    <p className="text-sm text-slate-400">
+                      Delivery • cost • quantity • reliability
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+
+                  {alternatives.map(
+                    (supplier) => {
+                      const recommended =
+                        supplier.name ===
+                        analysis.recommendedSupplier;
+
+                      return (
+                        <div
+                          key={supplier.name}
+                          className={`rounded-xl border p-5 ${
+                            recommended
+                              ? "border-cyan-400/50 bg-cyan-400/5"
+                              : "border-slate-700 bg-slate-950/30"
+                          }`}
+                        >
+
+                          <div className="flex items-start justify-between">
+
+                            <div>
+                              <h3 className="text-lg font-bold">
+                                {supplier.name}
+                              </h3>
+
+                              <p className="mt-1 text-sm text-slate-400">
+                                {supplier.quantity.toLocaleString()}{" "}
+                                units •{" "}
+                                {supplier.reliability}%
+                                reliability
+                              </p>
+                            </div>
+
+                            {recommended && (
+                              <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-300">
+                                Recommended
+                              </span>
+                            )}
+
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+
+                            <div>
+                              <p className="text-slate-500">
+                                Delivery
+                              </p>
+                              <p className="font-semibold">
+                                {supplier.deliveryDays} days
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">
+                                Cost
+                              </p>
+                              <p className="font-semibold">
+                                +{supplier.costIncrease}%
+                              </p>
+                            </div>
+
+                            <div>
+                              <p className="text-slate-500">
+                                Reliability
+                              </p>
+                              <p className="font-semibold">
+                                {supplier.reliability}%
+                              </p>
+                            </div>
+
+                          </div>
+
+                        </div>
+                      );
+                    }
+                  )}
+
+                </div>
+
+              </div>
+
+              {/* DECISION */}
+              <div className="rounded-2xl border border-slate-700/70 bg-slate-900/70 p-7">
+
+                <div className="flex items-center gap-3">
+                  <Sparkles className="h-6 w-6 text-cyan-400" />
+
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Decision Center
+                    </p>
+
+                    <h2 className="mt-1 text-2xl font-bold">
+                      Next Best Action
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-6">
+
+                  <p className="text-xs uppercase tracking-[0.2em] text-cyan-300">
+                    AI Recommendation
+                  </p>
+
+                  <p className="mt-3 text-xl font-bold leading-8">
                     {analysis.recommendation}
                   </p>
 
                 </div>
 
                 {/* REASONING */}
+                <div className="mt-7">
 
-                <div className="mt-5">
+                  <h3 className="text-lg font-bold">
+                    Agent Reasoning
+                  </h3>
 
-                  <p className="font-semibold">
-                    Agent reasoning
-                  </p>
-
-                  <ul className="mt-3 space-y-2">
+                  <div className="mt-4 space-y-3">
 
                     {analysis.reasoning.map(
-                      (reason) => (
-
-                        <li
-                          key={reason}
-                          className="flex gap-2 text-sm leading-6 text-slate-400"
+                      (reason, index) => (
+                        <div
+                          key={index}
+                          className="flex gap-3 text-sm leading-6 text-slate-300"
                         >
+                          <span className="text-cyan-400">
+                            →
+                          </span>
 
-                          <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-cyan-300" />
-
-                          {reason}
-
-                        </li>
-
-                      ),
-                    )}
-
-                  </ul>
-
-                </div>
-
-                {/* =================================================
-                    HUMAN APPROVAL GATE
-                ================================================== */}
-
-                <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/30 p-5">
-
-                  <div className="flex items-center justify-between gap-4">
-
-                    <div>
-
-                      <p className="text-xs uppercase tracking-[.18em] text-slate-500">
-                        Human approval gate
-                      </p>
-
-                      <p className="mt-1 text-sm text-slate-400">
-                        High-impact mitigation requires
-                        human approval before execution.
-                      </p>
-
-                    </div>
-
-                    {analysis.risk ===
-                      "HIGH" ||
-                    analysis.risk ===
-                      "CRITICAL" ? (
-
-                      <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-300">
-                        Approval Required
-                      </span>
-
-                    ) : (
-
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-300">
-                        Low Impact
-                      </span>
-
+                          <span>
+                            {reason}
+                          </span>
+                        </div>
+                      )
                     )}
 
                   </div>
 
-                  {/* APPROVAL BUTTONS */}
-
-                  <div className="mt-5 flex flex-wrap gap-3">
-
-                    <button
-                      onClick={() =>
-                        handleApproval(true)
-                      }
-                      disabled={
-                        approvalStatus ===
-                          "APPROVING" ||
-                        approvalStatus ===
-                          "APPROVED"
-                      }
-                      className="flex items-center gap-2 rounded-xl bg-emerald-400 px-4 py-3 text-sm font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-
-                      <CheckCircle2 className="h-4 w-4" />
-
-                      {approvalStatus ===
-                      "APPROVING"
-                        ? "Recording Approval..."
-                        : approvalStatus ===
-                            "APPROVED"
-                          ? "Action Approved"
-                          : "Approve Action"}
-
-                    </button>
-
-                    <button
-                      onClick={() =>
-                        handleApproval(false)
-                      }
-                      disabled={
-                        approvalStatus ===
-                        "APPROVING"
-                      }
-                      className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-
-                      <XCircle className="h-4 w-4" />
-
-                      Reject
-
-                    </button>
-
-                  </div>
-
-                  {/* APPROVED */}
-
-                  {approvalStatus ===
-                    "APPROVED" && (
-
-                    <div className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-400/[.05] px-4 py-4">
-
-                      <div className="flex items-center gap-2 text-sm font-semibold text-emerald-300">
-
-                        <CheckCircle2 className="h-4 w-4" />
-
-                        Human approval recorded
-
-                      </div>
-
-                      <p className="mt-1 text-sm text-slate-400">
-                        {approvalMessage}
-                      </p>
-
-                      <div className="mt-3 rounded-lg border border-emerald-400/10 bg-emerald-400/[.04] px-3 py-2">
-
-                        <p className="text-xs text-slate-500">
-                          Execution status
-                        </p>
-
-                        <p className="mt-1 text-sm font-semibold text-emerald-300">
-                          {executionStatus ||
-                            "READY_FOR_EXECUTION"}
-                        </p>
-
-                      </div>
-
-                    </div>
-
-                  )}
-
-                  {/* REJECTED */}
-
-                  {approvalStatus ===
-                    "REJECTED" && (
-
-                    <div className="mt-4 rounded-xl border border-red-400/20 bg-red-400/[.05] px-4 py-4">
-
-                      <div className="flex items-center gap-2 text-sm font-semibold text-red-300">
-
-                        <XCircle className="h-4 w-4" />
-
-                        Action Rejected
-
-                      </div>
-
-                      <p className="mt-1 text-sm text-slate-400">
-                        {approvalMessage}
-                      </p>
-
-                    </div>
-
-                  )}
-
-                  {/* ERROR */}
-
-                  {approvalStatus ===
-                    "ERROR" && (
-
-                    <div className="mt-4 rounded-xl border border-amber-400/20 bg-amber-400/[.05] px-4 py-4">
-
-                      <div className="flex items-center gap-2 text-sm font-semibold text-amber-300">
-
-                        <AlertTriangle className="h-4 w-4" />
-
-                        Approval Error
-
-                      </div>
-
-                      <p className="mt-1 text-sm text-slate-400">
-                        {approvalMessage}
-                      </p>
-
-                    </div>
-
-                  )}
-
                 </div>
-
-              </>
-
-            ) : (
-
-              <div className="mt-5 rounded-2xl border border-dashed border-white/10 p-7 text-sm text-slate-500">
-
-                Decision Agent output will appear after
-                investigation.
 
               </div>
 
+            </section>
+
+            {/* HUMAN APPROVAL */}
+            <section className="mb-8 rounded-2xl border border-yellow-500/30 bg-slate-900/70 p-7">
+
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                    Human Approval Gate
+                  </p>
+
+                  <h2 className="mt-2 text-xl font-bold">
+                    High-impact mitigation requires human approval
+                  </h2>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    Recommended supplier:{" "}
+                    <span className="font-semibold text-cyan-300">
+                      {analysis.recommendedSupplier}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+
+                  <button
+                    onClick={() =>
+                      handleApproval(true)
+                    }
+                    disabled={
+                      approvalStatus ===
+                        "APPROVING" ||
+                      approvalStatus ===
+                        "APPROVED" ||
+                      approvalStatus ===
+                        "REJECTING"
+                    }
+                    className="flex items-center gap-2 rounded-xl bg-emerald-400 px-5 py-3 font-bold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-5 w-5" />
+
+                    {approvalStatus ===
+                    "APPROVING"
+                      ? "Recording..."
+                      : approvalStatus ===
+                        "APPROVED"
+                      ? "Action Approved"
+                      : "Approve Action"}
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      handleApproval(false)
+                    }
+                    disabled={
+                      approvalStatus ===
+                        "APPROVING" ||
+                      approvalStatus ===
+                        "REJECTING" ||
+                      approvalStatus ===
+                        "REJECTED"
+                    }
+                    className="flex items-center gap-2 rounded-xl border border-slate-700 px-5 py-3 font-bold text-slate-200 transition hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    <X className="h-5 w-5" />
+                    Reject
+                  </button>
+
+                </div>
+
+              </div>
+
+              {approvalStatus ===
+                "APPROVED" && (
+                <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-5">
+
+                  <div className="flex items-center gap-3 text-emerald-300">
+                    <CheckCircle2 className="h-5 w-5" />
+
+                    <span className="font-bold">
+                      Human approval recorded
+                    </span>
+                  </div>
+
+                  <p className="mt-2 text-sm text-slate-300">
+                    Mitigation action is now authorized.
+                  </p>
+
+                  <button
+                    onClick={
+                      executeMitigation
+                    }
+                    disabled={
+                      !!execution
+                    }
+                    className="mt-5 flex items-center gap-2 rounded-xl bg-cyan-400 px-6 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Zap className="h-5 w-5" />
+
+                    {execution
+                      ? "Execution Prepared"
+                      : "Execute Mitigation"}
+                  </button>
+
+                </div>
+              )}
+
+              {approvalStatus ===
+                "REJECTED" && (
+                <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/5 p-5">
+
+                  <div className="flex items-center gap-3 text-red-300">
+                    <X className="h-5 w-5" />
+
+                    <span className="font-bold">
+                      Mitigation rejected
+                    </span>
+                  </div>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    No execution action was triggered.
+                  </p>
+
+                </div>
+              )}
+
+            </section>
+
+            {/* EXECUTION RESULT */}
+            {execution && (
+              <section className="mb-8 rounded-2xl border border-emerald-500/30 bg-[#071b19] p-7">
+
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-400/10 text-emerald-400">
+                      <Zap className="h-6 w-6" />
+                    </div>
+
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.2em] text-emerald-500">
+                        Execution Agent
+                      </p>
+
+                      <h2 className="mt-1 text-2xl font-bold">
+                        Mitigation Execution Ready
+                      </h2>
+                    </div>
+                  </div>
+
+                  <span className="rounded-full bg-emerald-400/10 px-4 py-2 text-sm font-bold text-emerald-300">
+                    {execution.executionStatus ||
+                      "EXECUTION_READY"}
+                  </span>
+
+                </div>
+
+                <p className="mt-5 text-slate-300">
+                  {execution.message}
+                </p>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-3">
+
+                  <ExecutionCard
+                    title="Purchase Order"
+                    status={
+                      execution
+                        .purchaseOrder
+                        ?.status ||
+                      "PREPARED"
+                    }
+                    detail={`${execution.purchaseOrder?.supplier || execution.supplier || "Supplier"} • ${execution.purchaseOrder?.quantity || execution.quantity || 0} units`}
+                    icon={
+                      <Package className="h-5 w-5" />
+                    }
+                  />
+
+                  <ExecutionCard
+                    title="Inventory Reservation"
+                    status={
+                      execution
+                        .inventoryReservation
+                        ?.status ||
+                      "RESERVED"
+                    }
+                    detail={`${execution.inventoryReservation?.quantity || execution.quantity || 0} units reserved`}
+                    icon={
+                      <ShieldCheck className="h-5 w-5" />
+                    }
+                  />
+
+                  <ExecutionCard
+                    title="Logistics Route"
+                    status={
+                      execution
+                        .logisticsPlan
+                        ?.status ||
+                      "ROUTE_PREPARED"
+                    }
+                    detail={`Inbound route for ${execution.logisticsPlan?.supplier || execution.supplier || "supplier"}`}
+                    icon={
+                      <Truck className="h-5 w-5" />
+                    }
+                  />
+
+                </div>
+
+                {execution.executionSteps &&
+                  execution.executionSteps.length >
+                    0 && (
+                    <div className="mt-7">
+
+                      <h3 className="mb-4 text-lg font-bold">
+                        Execution Timeline
+                      </h3>
+
+                      <div className="space-y-3">
+
+                        {execution.executionSteps.map(
+                          (step) => (
+                            <div
+                              key={step.step}
+                              className="flex items-start gap-4 rounded-xl border border-slate-700/70 bg-slate-950/40 p-4"
+                            >
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-400/10 text-emerald-400">
+                                <Check className="h-4 w-4" />
+                              </div>
+
+                              <div>
+                                <p className="font-semibold">
+                                  {step.agent}
+                                </p>
+
+                                <p className="text-sm text-cyan-300">
+                                  {step.action}
+                                </p>
+
+                                <p className="mt-1 text-sm text-slate-400">
+                                  {step.message}
+                                </p>
+                              </div>
+                            </div>
+                          )
+                        )}
+
+                      </div>
+
+                    </div>
+                  )}
+
+              </section>
             )}
+          </>
+        )}
 
-          </div>
+        {/* EMPTY STATE */}
+        {!analysis && !loading && (
+          <section className="mb-8 rounded-2xl border border-dashed border-slate-700 bg-slate-900/40 p-12 text-center">
 
-        </section>
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-cyan-400/10 text-cyan-400">
+              <Bot className="h-8 w-8" />
+            </div>
 
-        {/* =====================================================
-            FOOTER
-        ====================================================== */}
+            <h2 className="mt-5 text-2xl font-bold">
+              AI Investigation Ready
+            </h2>
 
-        <footer className="mt-7 flex justify-between border-t border-white/10 py-6 text-xs text-slate-600">
+            <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-400">
+              Select a supply-chain scenario and
+              run the AI investigation. The
+              multi-agent system will analyze
+              supplier, inventory, demand and
+              logistics signals before recommending
+              a mitigation action.
+            </p>
 
-          <span>
-            AI Supply Chain Disruption Response Agent •
-            Hackathon MVP
-          </span>
+            <button
+              onClick={
+                runInvestigation
+              }
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-cyan-400 px-6 py-3 font-bold text-slate-950 hover:bg-cyan-300"
+            >
+              <Sparkles className="h-5 w-5" />
+              Start Investigation
+            </button>
 
-          <span>
-            Human-in-the-loop • Simulated enterprise data
-          </span>
+          </section>
+        )}
+
+        {/* FOOTER */}
+        <footer className="border-t border-slate-800 pt-6 text-center text-sm text-slate-500">
+
+          <p>
+            AI Supply Chain Disruption Response Agent
+          </p>
+
+          <p className="mt-1">
+            Hackathon MVP • Multi-Agent AI • Human-in-the-Loop • Simulated Enterprise Data
+          </p>
 
         </footer>
 
       </div>
-
     </main>
+  );
+}
+
+/* =========================
+   STATUS CARD
+========================= */
+
+function StatusCard({
+  icon,
+  title,
+  subtitle,
+  type,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  type: "green" | "cyan" | "yellow";
+}) {
+  const classes = {
+    green:
+      "border-emerald-500/30 bg-emerald-500/5 text-emerald-400",
+    cyan:
+      "border-cyan-500/30 bg-cyan-500/5 text-cyan-400",
+    yellow:
+      "border-yellow-500/30 bg-yellow-500/5 text-yellow-400",
+  };
+
+  return (
+    <div
+      className={`rounded-2xl border p-5 ${classes[type]}`}
+    >
+      <div className="flex items-center gap-3">
+
+        <div className="h-3 w-3 rounded-full bg-current" />
+
+        <div className="flex-1">
+          <div className="flex items-center gap-2 font-bold">
+            {icon}
+            {title}
+          </div>
+
+          <p className="mt-1 text-sm text-slate-400">
+            {subtitle}
+          </p>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+/* =========================
+   MONITOR CARD
+========================= */
+
+function MonitorCard({
+  icon,
+  label,
+  title,
+  value,
+  detail,
+  warning = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  title: string;
+  value: string;
+  detail: string;
+  warning?: boolean;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-700/70 bg-slate-950/30 p-5">
+
+      <div className="flex items-center justify-between">
+
+        <p className="text-xs font-medium text-slate-500">
+          {label}
+        </p>
+
+        <span className="text-cyan-400">
+          {icon}
+        </span>
+
+      </div>
+
+      <h3 className="mt-5 text-lg font-bold">
+        {title}
+      </h3>
+
+      <p
+        className={`mt-1 text-xl font-semibold ${
+          warning
+            ? "text-yellow-300"
+            : "text-slate-200"
+        }`}
+      >
+        {value}
+      </p>
+
+      <p className="mt-2 text-sm text-slate-500">
+        {detail}
+      </p>
+
+    </div>
+  );
+}
+
+/* =========================
+   SIGNAL CARD
+========================= */
+
+function SignalCard({
+  title,
+  value,
+  detail,
+  icon,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-700/70 bg-slate-900/60 p-6">
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-400">
+          {title}
+        </p>
+
+        <span className="text-cyan-400">
+          {icon}
+        </span>
+      </div>
+
+      <p className="mt-5 text-3xl font-bold">
+        {value}
+      </p>
+
+      <p className="mt-1 text-sm text-slate-500">
+        {detail}
+      </p>
+
+    </div>
+  );
+}
+
+/* =========================
+   METRIC ROW
+========================= */
+
+function MetricRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-slate-700/70 bg-slate-950/30 px-4 py-3">
+
+      <span className="text-sm text-slate-400">
+        {label}
+      </span>
+
+      <span className="font-semibold">
+        {value}
+      </span>
+
+    </div>
+  );
+}
+
+/* =========================
+   TIMELINE
+========================= */
+
+function TimelineItem({
+  title,
+  message,
+  status,
+}: {
+  title: string;
+  message: string;
+  status:
+    | "completed"
+    | "warning"
+    | "recommendation";
+}) {
+  const isWarning =
+    status === "warning";
+
+  const isRecommendation =
+    status === "recommendation";
+
+  return (
+    <div className="flex gap-4">
+
+      <div
+        className={`mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+          isWarning
+            ? "bg-yellow-400/10 text-yellow-400"
+            : isRecommendation
+            ? "bg-cyan-400/10 text-cyan-400"
+            : "bg-emerald-400/10 text-emerald-400"
+        }`}
+      >
+        {isWarning ? (
+          <AlertTriangle className="h-4 w-4" />
+        ) : isRecommendation ? (
+          <Sparkles className="h-4 w-4" />
+        ) : (
+          <Check className="h-4 w-4" />
+        )}
+      </div>
+
+      <div className="min-w-0">
+
+        <p className="font-semibold">
+          {title}
+        </p>
+
+        <p className="mt-1 text-sm leading-6 text-slate-400">
+          {message}
+        </p>
+
+      </div>
+
+    </div>
+  );
+}
+
+/* =========================
+   EXECUTION CARD
+========================= */
+
+function ExecutionCard({
+  title,
+  status,
+  detail,
+  icon,
+}: {
+  title: string;
+  status: string;
+  detail: string;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-emerald-500/20 bg-slate-950/30 p-5">
+
+      <div className="flex items-center gap-3 text-emerald-400">
+        {icon}
+
+        <span className="font-semibold">
+          {title}
+        </span>
+      </div>
+
+      <p className="mt-4 text-lg font-bold text-emerald-300">
+        {status}
+      </p>
+
+      <p className="mt-1 text-sm text-slate-400">
+        {detail}
+      </p>
+
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { scenarios } from "@/data/scenarios";
+import { scenarios, Scenario } from "@/data/scenarios";
 import { investigateSupplyChain } from "@/lib/orchestrator";
 import { generateGeminiReasoning } from "@/lib/gemini";
 
@@ -11,63 +11,134 @@ export async function POST(request: Request) {
     const scenarioId =
       body?.scenarioId ?? "critical-delay";
 
-    const scenario = scenarios.find(
-      (item) => item.id === scenarioId,
+    const baseScenario = scenarios.find(
+      (item) => item.id === scenarioId
     );
 
-    if (!scenario) {
+    if (!baseScenario) {
       return NextResponse.json(
         {
           success: false,
           error: "Scenario not found",
         },
-        { status: 404 },
+        { status: 404 }
       );
     }
 
-    // --------------------------------------------------
-    // STEP 1: Run deterministic multi-agent investigation
-    // --------------------------------------------------
+    /*
+      If Live Supply Chain Monitor generated
+      new data, use that data for investigation.
+    */
+
+    let scenario: Scenario = baseScenario;
+
+    if (body?.liveData) {
+      const live = body.liveData;
+
+      scenario = {
+        ...baseScenario,
+
+        supplier: {
+          name:
+            live.supplier?.name ??
+            baseScenario.supplier.name,
+
+          status:
+            live.supplier?.status ??
+            baseScenario.supplier.status,
+
+          delayDays:
+            live.supplier?.delayDays ??
+            baseScenario.supplier.delayDays,
+
+          reliability:
+            live.supplier?.reliability ??
+            baseScenario.supplier.reliability,
+        },
+
+        inventory: {
+          product:
+            live.inventory?.product ??
+            baseScenario.inventory.product,
+
+          units:
+            live.inventory?.units ??
+            baseScenario.inventory.units,
+
+          daysRemaining:
+            live.inventory?.daysRemaining ??
+            baseScenario.inventory.daysRemaining,
+        },
+
+        demand: {
+          level:
+            live.demand?.level ??
+            baseScenario.demand.level,
+
+          dailyUnits:
+            live.demand?.dailyUnits ??
+            baseScenario.demand.dailyUnits,
+        },
+
+        logistics: {
+          status:
+            live.logistics?.status ??
+            baseScenario.logistics.status,
+
+          delayDays:
+            live.logistics?.delayDays ??
+            baseScenario.logistics.delayDays,
+        },
+      };
+    }
+
+    /*
+      STEP 1:
+      Run deterministic multi-agent investigation
+    */
 
     const investigation =
       investigateSupplyChain(scenario);
 
-    // --------------------------------------------------
-    // STEP 2: Ask Gemini reasoning agent
-    // --------------------------------------------------
+    /*
+      STEP 2:
+      Ask Gemini reasoning agent
+    */
 
     let geminiReasoning = null;
 
     try {
       geminiReasoning =
         await generateGeminiReasoning(
-          investigation,
+          investigation
         );
     } catch (error) {
       console.error(
         "Gemini reasoning failed:",
-        error,
+        error
       );
 
-      // Failure boundary:
-      // If Gemini is unavailable, the deterministic
-      // investigation still remains usable.
       geminiReasoning = {
         summary:
           "Gemini reasoning unavailable. Using deterministic agent analysis.",
+
         businessImpact:
           investigation.impact.impact,
+
         recommendedAction:
           investigation.recommendation,
+
         alternativeComparison:
           "Alternative suppliers were evaluated using the deterministic scoring engine.",
+
         confidence: "Medium" as const,
       };
     }
 
-    // --------------------------------------------------
-    // STEP 3: Build dashboard-compatible analysis
-    // --------------------------------------------------
+    /*
+      STEP 3:
+      Combine agent + Gemini results
+    */
 
     const analysis = {
       risk: investigation.risk,
@@ -105,15 +176,11 @@ export async function POST(request: Request) {
             agent: event.agent,
             status: event.status,
             message: event.message,
-          }),
+          })
         ),
 
       geminiReasoning,
     };
-
-    // --------------------------------------------------
-    // STEP 4: Return complete agent investigation
-    // --------------------------------------------------
 
     return NextResponse.json({
       success: true,
@@ -126,26 +193,36 @@ export async function POST(request: Request) {
 
       ai: {
         provider: "Gemini",
+
         reasoningAgent: true,
+
         humanApprovalRequired:
           investigation.humanApprovalRequired,
       },
+
+      source:
+        body?.liveData
+          ? "LIVE_SIMULATION"
+          : "SCENARIO",
     });
   } catch (error) {
     console.error(
       "Investigation error:",
-      error,
+      error
     );
 
     return NextResponse.json(
       {
         success: false,
+
         error:
           error instanceof Error
             ? error.message
             : "Investigation failed",
       },
-      { status: 500 },
+      {
+        status: 500,
+      }
     );
   }
 }
